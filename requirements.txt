@@ -1,0 +1,7 @@
+streamlit
+osmnx
+geopandas
+folium
+streamlit-folium
+shapely
+requests

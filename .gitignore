@@ -1,0 +1,23 @@
+# Sensitive data
+presets.csv
+
+# Virtual environment
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output files
+*.shp
+*.dbf
+*.shx
+*.prj
+*.cpg
+*.geojson
+*.zip
