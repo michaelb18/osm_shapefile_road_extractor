@@ -5,7 +5,7 @@
 
   <p align="center">
     Extract OSM roads within a radius, filter by type, calculate distances, compare road networks
-    across different dates, and export as Shapefile.
+    across different dates, and export as Shapefile in WGS84 projection.
     <br />
     
   </p>
@@ -57,6 +57,9 @@ Default setting is **Khartoum, Sudan**, as shown below:
 → 303 road segments found (as of 12-05-2026)
 
 Clicking a preset from the presets menu auto-fills the location and radius fields. Presets are saved locally in `presets.csv` (**NB**: .gitignore) and can be added to by saving a new preset.
+
+Bulk download presets:
+* NB: Overpass API has rate limits, expect 403 Forbidden errors if downloading too many presets at once.
 
 #### Interactive map
 Roads rendered on a CartoDB basemap, colour-coded by highway type (motorway, primary, residential, etc.) with tooltips showing road name and classification.

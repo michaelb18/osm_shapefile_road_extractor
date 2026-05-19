@@ -180,6 +180,7 @@ def overpass_roads(lat: float, lon: float, radius_m: float,
             columns=["osm_id","name","highway","oneway","lanes","maxspeed","surface","geometry"],
             crs="EPSG:4326"
         )
+    # ensures WGS84 projection 
     return gpd.GeoDataFrame(rows, crs="EPSG:4326")
 
 
@@ -278,6 +279,101 @@ with st.sidebar:
         else:
             for k in ["_preset_lat","_preset_lon","_preset_date"]:
                 st.session_state.pop(k, None)
+        
+        st.divider()
+
+        # Bulk download presets
+        st.subheader("Bulk download")
+        st.caption(f"Fetch and download shapefiles for all {len(presets)} presets into a single ZIP file.")
+        
+        batch_radius = st.slider("Batch search radius (m)", 100, 5000, 1000, step=100, key="batch_radius")
+        
+        if "batch_zip_buf" not in st.session_state:
+            st.session_state.batch_zip_buf = None
+            
+        if st.button("🔄 Prepare All Presets for Download", type="primary"):
+            with st.spinner("Fetching data for all presets. This may take a while..."):
+                import time
+                import tempfile
+                import zipfile
+                import io
+                import os
+                
+                buf = io.BytesIO()
+                with tempfile.TemporaryDirectory() as tmp:
+                    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                        progress_bar = st.progress(0, text="Starting batch download...")
+                        
+                        remaining_presets = list(enumerate(presets))
+                        max_passes = 3
+                        current_pass = 1
+                        total_presets = len(presets)
+                        
+                        while remaining_presets and current_pass <= max_passes:
+                            failed_this_pass = []
+                            for loop_idx, (i, preset) in enumerate(remaining_presets):
+                                # Calculate progress based on how many presets we have successfully processed plus our position in current pass
+                                pct = min(99, int((total_presets - len(remaining_presets) + loop_idx) / total_presets * 100))
+                                progress_bar.progress(pct, text=f"Pass {current_pass}: Fetching preset {i+1}/{total_presets}...")
+                                
+                                date_str = None
+                                if preset["date"]:
+                                    try:
+                                        d = datetime.date.fromisoformat(preset["date"])
+                                        date_str = f"{d.isoformat()}T00:00:00Z"
+                                    except ValueError:
+                                        pass
+                                
+                                try:
+                                    gdf_p = overpass_roads(preset["lat"], preset["lon"], batch_radius, date_str)
+                                    if not gdf_p.empty:
+                                        stem = f"preset_{i+1}"
+                                        # Use shp_safe directly as make_zip_shp takes too long to run multiple times, 
+                                        # Download zip file.
+                                        shp_safe(gdf_p).to_file(os.path.join(tmp, f"{stem}.shp"), driver="ESRI Shapefile")
+                                        for ext in [".shp", ".dbf", ".shx", ".prj", ".cpg"]:
+                                            fp = os.path.join(tmp, f"{stem}{ext}")
+                                            if os.path.exists(fp):
+                                                zf.write(fp, f"{stem}/{stem}{ext}")
+                                except Exception as e:
+                                    st.warning(f"Failed to fetch preset {i+1} on pass {current_pass}: {e}")
+                                    failed_this_pass.append((i, preset))
+                                
+                                # Overpass API delay
+                                if loop_idx < len(remaining_presets) - 1 or failed_this_pass:
+                                    time.sleep(2)
+                                    
+                            remaining_presets = failed_this_pass
+                            if remaining_presets:
+                                current_pass += 1
+                                if current_pass <= max_passes:
+                                    progress_bar.progress(pct, text=f"Waiting 15s before retrying {len(remaining_presets)} failed presets...")
+                                    time.sleep(15)
+                                else:
+                                    st.error(f"Failed to fetch {len(remaining_presets)} presets after {max_passes} passes. Included remaining data in ZIP.")
+                                
+                        progress_bar.progress(100, text="Bulk download preparation complete!")
+                        time.sleep(1) # Let the user see 100% completion
+                        progress_bar.empty()
+                        
+                    buf.seek(0)
+                    
+                if buf.getbuffer().nbytes > 22: # Empty zip is 22 bytes
+                    st.session_state.batch_zip_buf = buf
+                    st.success("✅ Bulk download ready! Click the download button below.")
+                else:
+                    st.session_state.batch_zip_buf = None
+                    st.error("❌ No data could be fetched for any presets.")
+                    
+        if st.session_state.batch_zip_buf is not None:
+            st.download_button(
+                "💾 Download All Presets ZIP",
+                data=st.session_state.batch_zip_buf,
+                file_name="all_presets_roads.zip",
+                mime="application/zip",
+                type="primary"
+            )
+
         st.divider()
     else:
         st.caption(
@@ -406,7 +502,8 @@ if st.session_state.gdf is not None:
                 st.session_state["q_lon"] = dd_lon
                 st.rerun()
 
-        # Find nearest road
+        # Find nearest road, projects in mercator for accurate distance calculations
+        # distances are computed on the projected geometry
         if st.button("📍 Find nearest road", type="primary"):
             qpt      = Point(q_lon, q_lat)
             gdf_m    = gdf.to_crs(epsg=3857)
@@ -863,6 +960,8 @@ if st.session_state.gdf is not None:
 
         if presets:
             st.success(f"✅ {len(presets)} preset(s) loaded")
+
+
 
             import pandas as pd
             pdf = pd.DataFrame(presets)[["lat","lon","date"]]
