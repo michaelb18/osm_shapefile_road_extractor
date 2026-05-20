@@ -200,13 +200,12 @@ def get_building_geometry(lat: float, lon: float, date_str: str = None):
     query = f"""
     [out:json]{date_clause}[timeout:30];
     (
-      way["building"](around:50,{lat},{lon});
+      nwr["building"](around:50,{lat},{lon});
+      nwr["building:part"](around:50,{lat},{lon});
       node["entrance"](around:50,{lat},{lon});
       node["door"](around:50,{lat},{lon});
     );
-    out body;
-    >;
-    out body qt;
+    out geom;
     """
     for mirror in MIRRORS:
         for attempt in range(3):
@@ -227,11 +226,9 @@ def get_building_geometry(lat: float, lon: float, date_str: str = None):
     else:
         return None
 
-    nodes = {}
     entrances = {}
     for el in data.get("elements", []):
         if el["type"] == "node":
-            nodes[el["id"]] = (el["lon"], el["lat"])
             tags = el.get("tags", {})
             if "entrance" in tags or "door" in tags:
                 entrances[el["id"]] = Point(el["lon"], el["lat"])
@@ -240,23 +237,27 @@ def get_building_geometry(lat: float, lon: float, date_str: str = None):
     
     building_polys = []
     for el in data.get("elements", []):
-        if el["type"] == "way" and "tags" in el and "building" in el["tags"]:
-            nd_ids = el.get("nodes", [])
-            coords = [nodes[n] for n in nd_ids if n in nodes]
-            if len(coords) >= 3:
-                try:
-                    poly = Polygon(coords)
-                    building_polys.append((poly, nd_ids))
-                except Exception:
-                    pass
+        tags = el.get("tags", {})
+        if "building" in tags or "building:part" in tags:
+            if el["type"] == "way":
+                coords = [(pt["lon"], pt["lat"]) for pt in el.get("geometry", [])]
+                if len(coords) >= 3:
+                    try:
+                        building_polys.append(Polygon(coords))
+                    except Exception:
+                        pass
+            elif el["type"] == "relation":
+                for m in el.get("members", []):
+                    if m.get("role") == "outer" and "geometry" in m:
+                        coords = [(pt["lon"], pt["lat"]) for pt in m.get("geometry", [])]
+                        if len(coords) >= 3:
+                            try:
+                                building_polys.append(Polygon(coords))
+                            except Exception:
+                                pass
 
-    for poly, nd_ids in building_polys:
+    for poly in building_polys:
         if poly.contains(qpt):
-            # 1. Entrances on the building perimeter
-            for n in nd_ids:
-                if n in entrances:
-                    return entrances[n]
-            # 2. Standalone entrances within or very close to the building
             best_entrance = None
             min_dist = float('inf')
             for n_id, ent_pt in entrances.items():
