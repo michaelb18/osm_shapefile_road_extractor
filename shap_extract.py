@@ -271,6 +271,35 @@ with st.sidebar:
     # Presets
     presets = load_presets(PRESET_FILE)
 
+    if not presets:
+        st.caption(
+            "No presets loaded. Place a `presets.csv` file next to this script or upload one below. "
+            "Download the template from the **📌 Presets** tab."
+        )
+        uploaded_file = st.file_uploader("Upload presets CSV", type=["csv"])
+        if uploaded_file is not None:
+            import csv
+            import io
+            text = uploaded_file.getvalue().decode("utf-8")
+            reader = csv.DictReader(
+                (row for row in io.StringIO(text) if not row.strip().startswith("#") and row.strip()),
+            )
+            for i, row in enumerate(reader):
+                try:
+                    lat_p  = float(row["lat"].strip())
+                    lon_p  = float(row["lon"].strip())
+                    date_p = row.get("date", "").strip() or None
+                    presets.append({
+                        "label": f"{i+1}. {lat_p:.5f}, {lon_p:.5f}" + (f"  [{date_p}]" if date_p else ""),
+                        "lat":   lat_p,
+                        "lon":   lon_p,
+                        "date":  date_p,
+                    })
+                except (ValueError, KeyError):
+                    continue
+            presets = presets[:50]
+        st.divider()
+
     if presets:
         st.subheader("📌 Presets")
         preset_labels = ["— select a preset —"] + [p["label"] for p in presets]
@@ -380,12 +409,7 @@ with st.sidebar:
             )
 
         st.divider()
-    else:
-        st.caption(
-            "No presets loaded. Place a `presets.csv` file next to this script. "
-            "Download the template from the **📌 Presets** tab."
-        )
-        st.divider()
+
 
     # Manual coordinate inputs (pre-filled by preset if one was chosen)
     st.subheader("📍 Coordinates")
