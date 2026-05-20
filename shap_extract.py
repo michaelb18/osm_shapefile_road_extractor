@@ -32,6 +32,11 @@ import datetime
 import requests
 
 import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+from collections import Counter
 import geopandas as gpd
 import folium
 from streamlit_folium import st_folium
@@ -180,10 +185,7 @@ def overpass_roads(lat: float, lon: float, radius_m: float,
             columns=["osm_id","name","highway","oneway","lanes","maxspeed","surface","geometry"],
             crs="EPSG:4326"
         )
-<<<<<<< HEAD
     # ensures WGS84 projection 
-=======
->>>>>>> 1e2678702def659824fdf69134e0bd8490ee3660
     return gpd.GeoDataFrame(rows, crs="EPSG:4326")
 
 
@@ -282,7 +284,6 @@ with st.sidebar:
         else:
             for k in ["_preset_lat","_preset_lon","_preset_date"]:
                 st.session_state.pop(k, None)
-<<<<<<< HEAD
         
         st.divider()
 
@@ -378,8 +379,6 @@ with st.sidebar:
                 type="primary"
             )
 
-=======
->>>>>>> 1e2678702def659824fdf69134e0bd8490ee3660
         st.divider()
     else:
         st.caption(
@@ -460,8 +459,30 @@ if st.session_state.gdf is not None:
 
     tab_map, tab_nearest, tab_compare, tab_interval, tab_filter, tab_stats, tab_export, tab_presets = st.tabs(
         ["🗺️ Map", "📍 Nearest Road", "🕐 Compare Dates", "📈 Interval Analysis",
-         "🔎 Filter & Select", "📊 Statistics", "💾 Export", "📌 Presets"]
+         "🔎 Filter & Select", "📊 Road Network Analytics", "💾 Export", "📌 Presets"]
     )
+
+    def render_dms_converter(prefix):
+        with st.expander("Convert DMS → decimal"):
+            dc1, dc2 = st.columns(2)
+            with dc1:
+                st.markdown("**Latitude**")
+                d1   = st.number_input("Degrees",  0,   90,  14,    key=f"{prefix}_d1")
+                m1   = st.number_input("Minutes",  0,   59,  46,    key=f"{prefix}_m1")
+                s1   = st.number_input("Seconds",  0.0, 59.99, 14.06, format="%.2f", key=f"{prefix}_s1")
+                dir1 = st.radio("Direction", ["N","S"], horizontal=True, key=f"{prefix}_dir1")
+            with dc2:
+                st.markdown("**Longitude**")
+                d2   = st.number_input("Degrees",  0,   180, 33,    key=f"{prefix}_d2")
+                m2   = st.number_input("Minutes",  0,   59,  20,    key=f"{prefix}_m2")
+                s2   = st.number_input("Seconds",  0.0, 59.99, 36.83, format="%.2f", key=f"{prefix}_s2")
+                dir2 = st.radio("Direction", ["E","W"], horizontal=True, key=f"{prefix}_dir2")
+            dd_lat = round(d1 + m1/60 + s1/3600, 6) * (-1 if dir1 == "S" else 1)
+            dd_lon = round(d2 + m2/60 + s2/3600, 6) * (-1 if dir2 == "W" else 1)
+            st.info(f"Decimal degrees → **{dd_lat}, {dd_lon}**")
+            if st.button("Use these coordinates", key=f"{prefix}_btn"):
+                return dd_lat, dd_lon
+        return None, None
 
     # Map
     with tab_map:
@@ -486,34 +507,14 @@ if st.session_state.gdf is not None:
         with col_b:
             q_lon = st.number_input("Query longitude", value=p["lon"], format="%.6f", key="q_lon")
 
-        with st.expander("Convert DMS → decimal"):
-            dc1, dc2 = st.columns(2)
-            with dc1:
-                st.markdown("**Latitude**")
-                d1   = st.number_input("Degrees",  0,   90,  14,    key="d1")
-                m1   = st.number_input("Minutes",  0,   59,  46,    key="m1")
-                s1   = st.number_input("Seconds",  0.0, 59.99, 14.06, format="%.2f", key="s1")
-                dir1 = st.radio("Direction", ["N","S"], horizontal=True, key="dir1")
-            with dc2:
-                st.markdown("**Longitude**")
-                d2   = st.number_input("Degrees",  0,   180, 33,    key="d2")
-                m2   = st.number_input("Minutes",  0,   59,  20,    key="m2")
-                s2   = st.number_input("Seconds",  0.0, 59.99, 36.83, format="%.2f", key="s2")
-                dir2 = st.radio("Direction", ["E","W"], horizontal=True, key="dir2")
-            dd_lat = round(d1 + m1/60 + s1/3600, 6) * (-1 if dir1 == "S" else 1)
-            dd_lon = round(d2 + m2/60 + s2/3600, 6) * (-1 if dir2 == "W" else 1)
-            st.info(f"Decimal degrees → **{dd_lat}, {dd_lon}**")
-            if st.button("Use these coordinates"):
-                st.session_state["q_lat"] = dd_lat
-                st.session_state["q_lon"] = dd_lon
-                st.rerun()
+        lat_val, lon_val = render_dms_converter("nr")
+        if lat_val is not None:
+            st.session_state["q_lat"] = lat_val
+            st.session_state["q_lon"] = lon_val
+            st.rerun()
 
-<<<<<<< HEAD
         # Find nearest road, projects in mercator for accurate distance calculations
         # distances are computed on the projected geometry
-=======
-        # Find nearest road
->>>>>>> 1e2678702def659824fdf69134e0bd8490ee3660
         if st.button("📍 Find nearest road", type="primary"):
             qpt      = Point(q_lon, q_lat)
             gdf_m    = gdf.to_crs(epsg=3857)
@@ -889,25 +890,413 @@ if st.session_state.gdf is not None:
 
         st.session_state.filtered_gdf = filtered
 
-    # Statistics
+    # Road Network Analytics
     with tab_stats:
         work = st.session_state.get("filtered_gdf", gdf)
-        lens = work.to_crs(epsg=3857).geometry.length
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Segments",     f"{len(work):,}")
-        c2.metric("Total length", f"{lens.sum()/1000:.2f} km")
-        c3.metric("Avg segment",  f"{lens.mean():.0f} m")
-        c4.metric("Longest",      f"{lens.max():.0f} m")
-        st.divider()
-        if "highway" in work.columns:
-            st.subheader("Length by road type")
-            hw_flat = work["highway"].apply(lambda x: x[0] if isinstance(x, list) else x)
-            tl = (lens.groupby(hw_flat).sum() / 1000).sort_values(ascending=False).reset_index()
-            tl.columns = ["highway_type", "length_km"]
-            tl["length_km"] = tl["length_km"].round(3)
-            tl["share_%"]   = (tl["length_km"] / tl["length_km"].sum() * 100).round(1)
-            st.dataframe(tl, use_container_width=True, hide_index=True)
-            st.bar_chart(tl.set_index("highway_type")["length_km"])
+        if work.empty:
+            st.warning("No road segments available.")
+        else:
+            work_utm = work.to_crs(epsg=32636)
+            
+            with st.expander("1. K-Nearest Roads", expanded=True):
+                st.caption("Find the K closest road segments from a specific coordinate.")
+                k1, k2, k3 = st.columns([2, 2, 1])
+                with k1:
+                    k_lat = st.number_input("Query latitude", value=st.session_state.get("k_lat_val", p["lat"]), format="%.6f", key="k_lat_in")
+                with k2:
+                    k_lon = st.number_input("Query longitude", value=st.session_state.get("k_lon_val", p["lon"]), format="%.6f", key="k_lon_in")
+                with k3:
+                    k_val = st.slider("k (roads)", 1, 20, 5, key="k_val")
+                
+                dms_lat, dms_lon = render_dms_converter("k_nr")
+                if dms_lat is not None:
+                    st.session_state["k_lat_val"] = dms_lat
+                    st.session_state["k_lon_val"] = dms_lon
+                    st.rerun()
+                    
+                if st.button("Calculate K-Nearest", key="btn_k_nearest", type="primary"):
+                    qpt_utm = gpd.GeoSeries([Point(k_lon, k_lat)], crs="EPSG:4326").to_crs(epsg=32636).iloc[0]
+                    dists = work_utm.geometry.distance(qpt_utm)
+                    k_indices = dists.nsmallest(k_val).index
+                    
+                    res_data = []
+                    map_lines = []
+                    for rank, idx in enumerate(k_indices, 1):
+                        dist_m = dists[idx]
+                        row = work.loc[idx]
+                        hw = row.get("highway", "unknown")
+                        if isinstance(hw, list): hw = hw[0]
+                        nm = row.get("name", "—")
+                        if isinstance(nm, list): nm = nm[0]
+                        if pd.isna(nm) or not nm or str(nm) == "nan": nm = "—"
+                        
+                        res_data.append({
+                            "Rank": rank, "Distance (m)": round(dist_m, 1),
+                            "Road Type": hw, "Road Name": nm, "OSM ID": row["osm_id"]
+                        })
+                        
+                        _, cpt_utm = nearest_points(qpt_utm, work_utm.loc[idx, "geometry"])
+                        cpt_wgs = gpd.GeoSeries([cpt_utm], crs="EPSG:32636").to_crs(epsg=4326).iloc[0]
+                        map_lines.append({
+                            "geom": row.geometry, "hw": hw, "nm": nm, "dist": dist_m,
+                            "snap_y": cpt_wgs.y, "snap_x": cpt_wgs.x
+                        })
+                    
+                    st.dataframe(pd.DataFrame(res_data), use_container_width=True, hide_index=True)
+                    
+                    d_vals = [r["Distance (m)"] for r in res_data]
+                    c1, c2, c3, c4, c5 = st.columns(5)
+                    c1.metric("Mean dist", f"{np.mean(d_vals):.1f} m")
+                    c2.metric("Median dist", f"{np.median(d_vals):.1f} m")
+                    c3.metric("Min dist", f"{np.min(d_vals):.1f} m")
+                    c4.metric("Max dist", f"{np.max(d_vals):.1f} m")
+                    c5.metric("Std dev", f"{np.std(d_vals):.1f} m" if len(d_vals) > 1 else "0.0 m")
+                    
+                    m_k = folium.Map(location=[k_lat, k_lon], zoom_start=15, tiles="CartoDB positron")
+                    folium.Marker([k_lat, k_lon], icon=folium.Icon(color="purple", icon="crosshairs", prefix="fa")).add_to(m_k)
+                    
+                    cmap = mcolors.LinearSegmentedColormap.from_list("", ["#300060", "#d0a0ff"])
+                    for i, item in enumerate(map_lines):
+                        color = mcolors.to_hex(cmap(i / (k_val - 1 if k_val > 1 else 1)))
+                        folium.GeoJson(
+                            item["geom"].__geo_interface__,
+                            style_function=lambda f, c=color: {"color": c, "weight": 4, "opacity": 0.8},
+                            tooltip=f"Rank {i+1}: {item['hw']} ({item['dist']:.1f}m)"
+                        ).add_to(m_k)
+                        folium.PolyLine(
+                            [[k_lat, k_lon], [item["snap_y"], item["snap_x"]]],
+                            color="#888", weight=2, dash_array="5 5",
+                            tooltip=f"{item['dist']:.1f} m"
+                        ).add_to(m_k)
+                        
+                    st_folium(m_k, width="100%", height=400, returned_objects=[])
+
+            with st.expander("2. Distance by Road Type"):
+                st.caption("Find the nearest road segment for each highway type. Uses the query point from K-Nearest Roads.")
+                if st.button("Calculate Distances by Type", key="dist_type_btn"):
+                    qpt_utm = gpd.GeoSeries([Point(st.session_state.get("k_lon_val", p["lon"]), st.session_state.get("k_lat_val", p["lat"]))], crs="EPSG:4326").to_crs(epsg=32636).iloc[0]
+                    dists = work_utm.geometry.distance(qpt_utm)
+                    
+                    hw_flat = work["highway"].apply(lambda x: x[0] if isinstance(x, list) else x)
+                    work_dist = work.copy()
+                    work_dist["dist_m"] = dists
+                    work_dist["hw_flat"] = hw_flat
+                    
+                    min_idx = work_dist.groupby("hw_flat")["dist_m"].idxmin()
+                    
+                    res_type = []
+                    PAVED_TYPES = {"motorway", "trunk", "primary", "secondary", "tertiary", "residential"}
+                    PAVED_SURFACES = {"asphalt", "concrete", "paved"}
+                    
+                    overall_min = float('inf')
+                    overall_type = None
+                    paved_min = float('inf')
+                    paved_type = None
+                    
+                    for hw_type, idx in min_idx.items():
+                        dist_m = work_dist.loc[idx, "dist_m"]
+                        nm = work_dist.loc[idx, "name"]
+                        if isinstance(nm, list): nm = nm[0]
+                        if pd.isna(nm) or not nm or str(nm) == "nan": nm = "—"
+                        
+                        surf = str(work_dist.loc[idx].get("surface", "")).lower()
+                        is_paved = hw_type in PAVED_TYPES or any(s in surf for s in PAVED_SURFACES)
+                        
+                        res_type.append({
+                            "Highway Type": hw_type, "Distance (m)": round(dist_m, 1),
+                            "Road Name": nm, "Paved": "Yes" if is_paved else "No"
+                        })
+                        
+                        if dist_m < overall_min:
+                            overall_min = dist_m
+                            overall_type = hw_type
+                        if is_paved and dist_m < paved_min:
+                            paved_min = dist_m
+                            paved_type = hw_type
+                            
+                    df_type = pd.DataFrame(res_type).sort_values("Distance (m)")
+                    mc1, mc2 = st.columns(2)
+                    mc1.metric("Closest Overall", f"{overall_type} ({overall_min:.1f} m)")
+                    mc2.metric("Closest Paved", f"{paved_type} ({paved_min:.1f} m)" if paved_type else "None found")
+                    st.dataframe(df_type, use_container_width=True, hide_index=True)
+
+            with st.expander("3. Network Statistics"):
+                lens = work_utm.geometry.length
+                tot_km = lens.sum() / 1000
+                area_km2 = (np.pi * (p["radius"] ** 2)) / 1_000_000
+                density = tot_km / area_km2 if area_km2 > 0 else 0
+                
+                st.markdown(f"**Total road length:** {tot_km:.2f} km")
+                st.markdown(f"**Road density:** {density:.2f} km/km² (Area: {area_km2:.2f} km²)")
+                
+                sc1, sc2, sc3, sc4, sc5 = st.columns(5)
+                sc1.metric("Avg Segment", f"{lens.mean():.1f} m")
+                sc2.metric("Median Segment", f"{lens.median():.1f} m")
+                sc3.metric("Shortest", f"{lens.min():.1f} m")
+                sc4.metric("Longest", f"{lens.max():.1f} m")
+                sc5.metric("Std Dev", f"{lens.std():.1f} m" if len(lens) > 1 else "0.0 m")
+                
+                hw_flat = work["highway"].apply(lambda x: x[0] if isinstance(x, list) else x)
+                counts = hw_flat.value_counts().reset_index()
+                counts.columns = ["Highway Type", "Count"]
+                
+                st.subheader("Segment Count per Highway Type")
+                st.bar_chart(counts.set_index("Highway Type"))
+                
+                st.subheader("Share of Highway Type by Length")
+                length_by_type = work_utm.copy()
+                length_by_type["hw_flat"] = hw_flat
+                length_by_type["length"] = lens
+                len_sums = length_by_type.groupby("hw_flat")["length"].sum().sort_values(ascending=False)
+                
+                # Group small slices (< 2%) into 'Other'
+                total_len = len_sums.sum()
+                threshold = 0.02 * total_len
+                large_slices = len_sums[len_sums >= threshold].copy()
+                small_slices = len_sums[len_sums < threshold]
+                
+                if not small_slices.empty:
+                    large_slices["Other"] = small_slices.sum()
+                
+                fig, ax = plt.subplots(figsize=(8, 5))
+                
+                wedges, texts, autotexts = ax.pie(
+                    large_slices, 
+                    labels=None, 
+                    autopct=lambda pct: f"{pct:.1f}%" if pct > 3 else "",
+                    startangle=90, 
+                    wedgeprops=dict(width=0.4, edgecolor='white', linewidth=1.5),
+                    pctdistance=0.8
+                )
+                
+                plt.setp(autotexts, size=10, weight="bold")
+                
+                # Create legend labels with type and km
+                legend_labels = [f"{idx} ({val/1000:.1f} km)" for idx, val in large_slices.items()]
+                
+                ax.legend(wedges, legend_labels,
+                          title="Highway Types",
+                          loc="center left",
+                          bbox_to_anchor=(1, 0, 0.5, 1))
+                          
+                ax.axis('equal')
+                plt.tight_layout()
+                st.pyplot(fig)
+
+            with st.expander("4. Connectivity & Topology"):
+                all_nodes = []
+                endpoints = []
+                for geom in work.geometry:
+                    if geom.geom_type == 'LineString':
+                        coords = list(geom.coords)
+                        all_nodes.extend(coords)
+                        endpoints.extend([coords[0], coords[-1]])
+                    elif geom.geom_type == 'MultiLineString':
+                        for line in geom.geoms:
+                            coords = list(line.coords)
+                            all_nodes.extend(coords)
+                            endpoints.extend([coords[0], coords[-1]])
+                            
+                node_counts = Counter(all_nodes)
+                intersections = sum(1 for v in node_counts.values() if v >= 2)
+                dead_ends = sum(1 for k, v in node_counts.items() if v == 1 and k in endpoints)
+                ratio = dead_ends / intersections if intersections > 0 else 0
+                
+                cc1, cc2, cc3, cc4 = st.columns(4)
+                cc1.metric("Unique Nodes", f"{len(node_counts):,}")
+                cc2.metric("Intersections", f"{intersections:,}")
+                cc3.metric("Dead Ends", f"{dead_ends:,}")
+                cc4.metric("Dead-end Ratio", f"{ratio:.2f}")
+                
+                if ratio > 0.5:
+                    st.info("High ratio suggests informal or incomplete network with many un-connected segments.")
+                elif ratio < 0.1:
+                    st.info("Low ratio suggests a highly connected, grid-like or dense network.")
+                else:
+                    st.info("Moderate ratio indicates a standard mix of through-roads and cul-de-sacs.")
+
+            with st.expander("5. Change Analytics"):
+                ca1, ca2, ca3 = st.columns(3)
+                with ca1:
+                    c_start = st.date_input("Start date", value=datetime.date(2016, 1, 1), min_value=MIN_DATE, max_value=MAX_DATE, key="ca_start")
+                with ca2:
+                    c_end = st.date_input("End date", value=MAX_DATE, min_value=MIN_DATE, max_value=MAX_DATE, key="ca_end")
+                with ca3:
+                    c_int = st.selectbox("Interval", ["Monthly", "Quarterly", "Every 6 months", "Yearly"], index=3, key="ca_int")
+                    
+                if st.button("Run Change Analytics", type="primary"):
+                    INTERVAL_MONTHS = {"Monthly": 1, "Quarterly": 3, "Every 6 months": 6, "Yearly": 12}
+                    step = INTERVAL_MONTHS[c_int]
+                    
+                    def gen_dates(s, e, m):
+                        dates, cur = [], s
+                        while cur <= e:
+                            dates.append(cur)
+                            nxt_m = cur.month - 1 + m
+                            cur = cur.replace(year=cur.year + nxt_m // 12, month=nxt_m % 12 + 1)
+                        if dates[-1] != e: dates.append(e)
+                        return dates
+                        
+                    c_dates = gen_dates(c_start, c_end, step)
+                    
+                    if c_start >= c_end:
+                        st.error("Start date must be before end date.")
+                    else:
+                        progress = st.progress(0, text="Fetching snapshots...")
+                        c_records = []
+                        prev_ids = None
+                        
+                        for i, d in enumerate(c_dates):
+                            if i > 0: import time; time.sleep(2)
+                            progress.progress(int((i+1)/len(c_dates)*100), text=f"Fetching {d}...")
+                            try:
+                                sgdf = overpass_roads(p["lat"], p["lon"], p["radius"], f"{d.isoformat()}T00:00:00Z")
+                                cids = set(sgdf["osm_id"].astype(str))
+                                
+                                t_km = sgdf.to_crs(epsg=32636).geometry.length.sum() / 1000 if not sgdf.empty else 0.0
+                                n_segs = len(sgdf)
+                                added = len(cids - prev_ids) if prev_ids is not None else 0
+                                removed = len(prev_ids - cids) if prev_ids is not None else 0
+                                
+                                hw_counts = sgdf["highway"].apply(lambda x: x[0] if isinstance(x, list) else x).value_counts().to_dict() if not sgdf.empty and "highway" in sgdf.columns else {}
+                                
+                                c_records.append({
+                                    "date": d, "segments": n_segs, "total_km": t_km,
+                                    "added": added, "removed": removed, "net_change": added - removed,
+                                    "hw_counts": hw_counts
+                                })
+                                prev_ids = cids
+                            except Exception as e:
+                                st.warning(f"Failed for {d}: {e}")
+                                
+                        progress.empty()
+                        
+                        if len(c_records) > 1:
+                            df_c = pd.DataFrame(c_records)
+                            years_diff = (c_end - c_start).days / 365.25
+                            if years_diff > 0:
+                                rate_add_km = (df_c["total_km"].iloc[-1] - df_c["total_km"].iloc[0]) / years_diff
+                                rate_add_seg = df_c["added"].sum() / years_diff
+                                rate_rem_seg = df_c["removed"].sum() / years_diff
+                                
+                                st.markdown("### Change Rates")
+                                cr1, cr2, cr3 = st.columns(3)
+                                cr1.metric("Addition Rate", f"{rate_add_km:.2f} km/yr", f"{rate_add_seg:.1f} segs/yr")
+                                cr2.metric("Removal Rate", f"{rate_rem_seg:.1f} segs/yr", delta_color="inverse")
+                                cr3.metric("Net Change Rate", f"{rate_add_seg - rate_rem_seg:.1f} segs/yr")
+                                
+                                hw_start = df_c["hw_counts"].iloc[0]
+                                hw_end = df_c["hw_counts"].iloc[-1]
+                                all_hws = set(hw_start.keys()) | set(hw_end.keys())
+                                hw_diffs = {hw: hw_end.get(hw, 0) - hw_start.get(hw, 0) for hw in all_hws}
+                                grew_most = max(hw_diffs, key=hw_diffs.get) if hw_diffs else "N/A"
+                                shrank_most = min(hw_diffs, key=hw_diffs.get) if hw_diffs else "N/A"
+                                
+                                st.markdown(f"**Grew Most:** {grew_most} (+{hw_diffs.get(grew_most,0)})")
+                                st.markdown(f"**Shrank Most:** {shrank_most} ({hw_diffs.get(shrank_most,0)})")
+                                
+                                area_km2 = (np.pi * (p["radius"] ** 2)) / 1_000_000
+                                df_c["density"] = df_c["total_km"] / area_km2
+                                
+                                fig, ax = plt.subplots(figsize=(10, 4))
+                                ax.plot(df_c["date"], df_c["density"], marker='o', label="Density")
+                                
+                                mean_net = df_c["net_change"].mean()
+                                std_net = df_c["net_change"].std()
+                                if pd.notna(std_net) and std_net > 0:
+                                    anomalies = df_c[abs(df_c["net_change"] - mean_net) > 2 * std_net]
+                                    if not anomalies.empty:
+                                        ax.scatter(anomalies["date"], anomalies["density"], color='red', s=100, zorder=5, label="Anomaly (>2σ net change)")
+                                
+                                ax.set_title("Road Density Over Time")
+                                ax.set_ylabel("Density (km/km²)")
+                                ax.legend()
+                                st.pyplot(fig)
+                                
+                                csv_out = df_c.drop(columns=["hw_counts"]).to_csv(index=False)
+                                st.download_button("⬇️ Download Change Analytics CSV", csv_out.encode(), "change_analytics.csv", "text/csv")
+
+            with st.expander("6. Comparative Accessibility"):
+                ca_c1, ca_c2 = st.columns(2)
+                with ca_c1:
+                    st.markdown("**Point A**")
+                    pa_lat = st.number_input("Lat A", value=p["lat"] + 0.005, format="%.6f")
+                    pa_lon = st.number_input("Lon A", value=p["lon"], format="%.6f")
+                with ca_c2:
+                    st.markdown("**Point B**")
+                    pb_lat = st.number_input("Lat B", value=p["lat"] - 0.005, format="%.6f")
+                    pb_lon = st.number_input("Lon B", value=p["lon"], format="%.6f")
+                    
+                use_ca_dates = st.checkbox("Compare across dates?", value=False)
+                ca_date1 = ca_date2 = None
+                if use_ca_dates:
+                    cd1, cd2 = st.columns(2)
+                    ca_date1 = cd1.date_input("Date 1", value=datetime.date(2020,1,1), min_value=MIN_DATE, max_value=MAX_DATE)
+                    ca_date2 = cd2.date_input("Date 2", value=MAX_DATE, min_value=MIN_DATE, max_value=MAX_DATE)
+                    
+                if st.button("Calculate Accessibility", type="primary"):
+                    def calc_access(pt_lat, pt_lon, net_gdf):
+                        if net_gdf.empty: return {"nearest": None, "paved": None, "primary": None, "k5_mean": None}
+                        pt_utm = gpd.GeoSeries([Point(pt_lon, pt_lat)], crs="EPSG:4326").to_crs(epsg=32636).iloc[0]
+                        net_utm = net_gdf.to_crs(epsg=32636)
+                        
+                        dists = net_utm.geometry.distance(pt_utm)
+                        nearest = dists.min()
+                        k5_mean = dists.nsmallest(5).mean() if len(dists) >= 5 else dists.mean()
+                        
+                        PAVED = {"motorway", "trunk", "primary", "secondary", "tertiary", "residential"}
+                        PAVED_SURF = {"asphalt", "concrete", "paved"}
+                        PRIMARY = {"motorway", "trunk", "primary"}
+                        
+                        hw_flat = net_gdf["highway"].apply(lambda x: x[0] if isinstance(x, list) else x)
+                        surf = net_gdf.get("surface", pd.Series([None]*len(net_gdf))).apply(lambda x: x[0] if isinstance(x, list) else x).astype(str).str.lower()
+                        
+                        is_paved = hw_flat.isin(PAVED) | surf.apply(lambda s: any(ps in s for ps in PAVED_SURF))
+                        is_primary = hw_flat.isin(PRIMARY)
+                        
+                        dists_paved = dists[is_paved]
+                        nearest_paved = dists_paved.min() if not dists_paved.empty else None
+                        
+                        dists_prim = dists[is_primary]
+                        nearest_prim = dists_prim.min() if not dists_prim.empty else None
+                        
+                        return {
+                            "nearest": nearest, "paved": nearest_paved,
+                            "primary": nearest_prim, "k5_mean": k5_mean
+                        }
+                        
+                    if not use_ca_dates:
+                        acc_a = calc_access(pa_lat, pa_lon, work)
+                        acc_b = calc_access(pb_lat, pb_lon, work)
+                        
+                        cc1, cc2 = st.columns(2)
+                        for col, pt, acc in [(cc1, "A", acc_a), (cc2, "B", acc_b)]:
+                            with col:
+                                st.markdown(f"### Point {pt}")
+                                st.metric("Nearest Road", f"{acc['nearest']:.1f} m" if pd.notnull(acc['nearest']) else "N/A")
+                                st.metric("Nearest Paved", f"{acc['paved']:.1f} m" if pd.notnull(acc['paved']) else "N/A")
+                                st.metric("Nearest Primary+", f"{acc['primary']:.1f} m" if pd.notnull(acc['primary']) else "N/A")
+                                st.metric("K=5 Mean Dist", f"{acc['k5_mean']:.1f} m" if pd.notnull(acc['k5_mean']) else "N/A")
+                    else:
+                        with st.spinner("Fetching historical networks..."):
+                            gdf_d1 = overpass_roads(p["lat"], p["lon"], p["radius"], f"{ca_date1.isoformat()}T00:00:00Z")
+                            gdf_d2 = overpass_roads(p["lat"], p["lon"], p["radius"], f"{ca_date2.isoformat()}T00:00:00Z")
+                            
+                        acc_a1 = calc_access(pa_lat, pa_lon, gdf_d1)
+                        acc_a2 = calc_access(pa_lat, pa_lon, gdf_d2)
+                        acc_b1 = calc_access(pb_lat, pb_lon, gdf_d1)
+                        acc_b2 = calc_access(pb_lat, pb_lon, gdf_d2)
+                        
+                        cc1, cc2 = st.columns(2)
+                        for col, pt, a1, a2 in [(cc1, "A", acc_a1, acc_a2), (cc2, "B", acc_b1, acc_b2)]:
+                            with col:
+                                st.markdown(f"### Point {pt} ({ca_date1} → {ca_date2})")
+                                for k, title in [('nearest', 'Nearest Road'), ('paved', 'Nearest Paved'), ('k5_mean', 'K=5 Mean Dist')]:
+                                    if pd.notnull(a1[k]) and pd.notnull(a2[k]):
+                                        diff = a2[k] - a1[k]
+                                        st.metric(title, f"{a2[k]:.1f} m", f"{diff:+.1f} m", delta_color="inverse")
+                                    else:
+                                        st.metric(title, "N/A")
 
     # Export
     with tab_export:
@@ -971,11 +1360,8 @@ if st.session_state.gdf is not None:
         if presets:
             st.success(f"✅ {len(presets)} preset(s) loaded")
 
-<<<<<<< HEAD
 
 
-=======
->>>>>>> 1e2678702def659824fdf69134e0bd8490ee3660
             import pandas as pd
             pdf = pd.DataFrame(presets)[["lat","lon","date"]]
             pdf["date"] = pdf["date"].fillna("current")

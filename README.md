@@ -5,11 +5,7 @@
 
   <p align="center">
     Extract OSM roads within a radius, filter by type, calculate distances, compare road networks
-<<<<<<< HEAD
     across different dates, and export as Shapefile in WGS84 projection.
-=======
-    across different dates, and export as Shapefile.
->>>>>>> 1e2678702def659824fdf69134e0bd8490ee3660
     <br />
     
   </p>
@@ -62,12 +58,9 @@ Default setting is **Khartoum, Sudan**, as shown below:
 
 Clicking a preset from the presets menu auto-fills the location and radius fields. Presets are saved locally in `presets.csv` (**NB**: .gitignore) and can be added to by saving a new preset.
 
-<<<<<<< HEAD
 Bulk download presets:
 * NB: Overpass API has rate limits, expect 403 Forbidden errors if downloading too many presets at once.
 
-=======
->>>>>>> 1e2678702def659824fdf69134e0bd8490ee3660
 #### Interactive map
 Roads rendered on a CartoDB basemap, colour-coded by highway type (motorway, primary, residential, etc.) with tooltips showing road name and classification.
 
@@ -95,8 +88,15 @@ Sample the road network at regular intervals (monthly, quarterly, every 6 months
 #### Filtering
 Filter the fetched network by highway type and minimum segment length. Results shown in a live-updating attribute table.
 
-#### Statistics
-Total length, segment count, average and longest segment, and a length breakdown by road type with bar chart.
+#### Road Analytics
+A dedicated analytics tab providing deeper spatial insight into the extracted road network.
+
+* K-Nearest Roads — query the k closest road segments to any coordinate, with a metric summary block and a gradient-coloured map showing each road and its precise snap point
+* Distance by Road Type — distances grouped by highway classification, with the closest overall and closest paved segment (by surface tag) explicitly highlighted
+* Network Statistics — total length, road density, segment length breakdown, and highway distribution as a bar chart and pie chart
+* Connectivity & Topology — estimates unique intersections vs. dead ends by parsing line endpoint coordinates across the full network
+* Change Analytics — samples the network over user-defined intervals via overpass_roads(), computing addition and removal rates per highway class, with density plotted over time and anomalies exceeding 2σ flagged in red
+* Comparative Accessibility — side-by-side inputs for two coordinates assessing distance differences to any road, paved roads, and primary infrastructure, with optional cross-date comparison
 
 #### Export
 Download results as a zipped ESRI Shapefile (all 5 components) or GeoJSON. Filtered subsets and comparison results (added/removed) each exportable independently.
