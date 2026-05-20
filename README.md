@@ -77,7 +77,9 @@ Types of roads (available for filtering):
   * path
 
 #### Nearest road finder
-Input any coordinate to find the closest road segment. Displays distance in metres, road type, and road name, with a connector line drawn between the query point and the snap point on the road. Includes a DMS → decimal degrees converter.
+Input any coordinate to find the closest road segment. Displays distance in metres, road type, and road name, with a connector line drawn between the query point and the snap point on the road. 
+* Includes a DMS → decimal degrees converter.
+* Detects building perimeter and draws from entrance or door heuristic if available. 
 
 #### Date comparison
 Fetch the same area at two different dates and diff the results by OSM way ID. Highlights added roads (green), removed roads (red), and unchanged roads (grey) on a single map. Reports segment counts and total kilometres added, removed, and net. Both result sets exportable as Shapefiles.

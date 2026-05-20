@@ -40,7 +40,7 @@ from collections import Counter
 import geopandas as gpd
 import folium
 from streamlit_folium import st_folium
-from shapely.geometry import Point, LineString
+from shapely.geometry import Point, LineString, Polygon
 from shapely.ops import nearest_points
 
 # Page config
@@ -187,6 +187,67 @@ def overpass_roads(lat: float, lon: float, radius_m: float,
         )
     # ensures WGS84 projection 
     return gpd.GeoDataFrame(rows, crs="EPSG:4326")
+
+
+def get_building_geometry(lat: float, lon: float, date_str: str = None):
+    """Fetch building footprint at coordinate and return its geometry, or an entrance point if available."""
+    MIRRORS = [
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    ]
+    date_clause = f'[date:"{date_str}"]' if date_str else ""
+    query = f"""
+    [out:json]{date_clause}[timeout:30];
+    way["building"](around:50,{lat},{lon});
+    out body;
+    >;
+    out body qt;
+    """
+    for mirror in MIRRORS:
+        for attempt in range(3):
+            try:
+                if attempt > 0: time.sleep(2 ** attempt)
+                resp = requests.post(mirror, data={"data": query}, timeout=30)
+                if resp.status_code in (429, 406, 504, 502, 503):
+                    time.sleep(5)
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                break
+            except Exception:
+                continue
+        else:
+            continue
+        break
+    else:
+        return None
+
+    nodes = {}
+    entrances = {}
+    for el in data.get("elements", []):
+        if el["type"] == "node":
+            nodes[el["id"]] = (el["lon"], el["lat"])
+            tags = el.get("tags", {})
+            if "entrance" in tags or "door" in tags:
+                entrances[el["id"]] = Point(el["lon"], el["lat"])
+
+    qpt = Point(lon, lat)
+    for el in data.get("elements", []):
+        if el["type"] == "way" and "tags" in el and "building" in el["tags"]:
+            nd_ids = el.get("nodes", [])
+            coords = [nodes[n] for n in nd_ids if n in nodes]
+            if len(coords) >= 3:
+                try:
+                    poly = Polygon(coords)
+                    if poly.contains(qpt):
+                        for n in nd_ids:
+                            if n in entrances:
+                                return entrances[n]
+                        return poly
+                except Exception:
+                    pass
+    return None
 
 
 def add_roads_to_map(fmap, gdf, color_by_type=True,
@@ -541,14 +602,23 @@ if st.session_state.gdf is not None:
         # distances are computed on the projected geometry
         if st.button("📍 Find nearest road", type="primary"):
             qpt      = Point(q_lon, q_lat)
+            
+            with st.spinner("Checking for buildings at query point..."):
+                bldg_geom = get_building_geometry(q_lat, q_lon, p.get("date"))
+                
+            origin_geom = bldg_geom if bldg_geom is not None else qpt
+            
             gdf_m    = gdf.to_crs(epsg=3857)
-            qpt_m    = gpd.GeoSeries([qpt], crs="EPSG:4326").to_crs(epsg=3857).iloc[0]
-            dists    = gdf_m.geometry.distance(qpt_m)
+            origin_m = gpd.GeoSeries([origin_geom], crs="EPSG:4326").to_crs(epsg=3857).iloc[0]
+            
+            dists    = gdf_m.geometry.distance(origin_m)
             nidx     = dists.idxmin()
             dist_m   = dists[nidx]
             nrow     = gdf.loc[nidx]
-            _, cpt_m = nearest_points(qpt_m, gdf_m.loc[nidx, "geometry"])
+            
+            cpt_origin_m, cpt_m = nearest_points(origin_m, gdf_m.loc[nidx, "geometry"])
             cpt_wgs  = gpd.GeoSeries([cpt_m], crs="EPSG:3857").to_crs(epsg=4326).iloc[0]
+            cpt_origin_wgs = gpd.GeoSeries([cpt_origin_m], crs="EPSG:3857").to_crs(epsg=4326).iloc[0]
 
             hw = nrow.get("highway") or "unknown"
             if isinstance(hw, list): hw = hw[0]
@@ -560,23 +630,40 @@ if st.session_state.gdf is not None:
             c2.metric("Road type",        str(hw))
             c3.metric("Road name",        str(name) if name and str(name) != "nan" else "—")
 
-            mid_lat = (q_lat + cpt_wgs.y) / 2
-            mid_lon = (q_lon + cpt_wgs.x) / 2
+            if bldg_geom is not None:
+                st.success("🏢 Point falls within a building! Distance measured from the building perimeter/entrance.")
+
+            mid_lat = (cpt_origin_wgs.y + cpt_wgs.y) / 2
+            mid_lon = (cpt_origin_wgs.x + cpt_wgs.x) / 2
 
             nm = folium.Map(location=[mid_lat, mid_lon], zoom_start=16, tiles="CartoDB positron")
             add_roads_to_map(nm, gdf, color_by_type=False,
                              default_color="#b0b0b0", weight=1.5, opacity=0.5)
+
+            if bldg_geom is not None and isinstance(bldg_geom, Polygon):
+                folium.GeoJson(
+                    bldg_geom.__geo_interface__,
+                    style_function=lambda f: {"color": "blue", "weight": 2, "fillColor": "blue", "fillOpacity": 0.2},
+                    tooltip="Building"
+                ).add_to(nm)
+
             folium.GeoJson(nrow.geometry.__geo_interface__,
                            style_function=lambda f: {"color":"#e06030","weight":4,"opacity":1},
                            tooltip=f"{hw}" + (f" — {name}" if name and str(name) != "nan" else "")
                            ).add_to(nm)
             folium.Marker(location=[q_lat, q_lon],
                           tooltip=f"Query point ({q_lat:.5f}, {q_lon:.5f})",
-                          icon=folium.Icon(color="purple", icon="map-marker", prefix="fa")).add_to(nm)
+                          icon=folium.Icon(color="purple", icon="crosshairs", prefix="fa")).add_to(nm)
+                          
+            if bldg_geom is not None:
+                folium.CircleMarker(location=[cpt_origin_wgs.y, cpt_origin_wgs.x], radius=4,
+                                    color="blue", fill=True, fill_color="blue",
+                                    tooltip="Closest building point/entrance").add_to(nm)
+
             folium.CircleMarker(location=[cpt_wgs.y, cpt_wgs.x], radius=6,
                                 color="#e06030", fill=True, fill_color="#e06030",
                                 tooltip="Closest point on road").add_to(nm)
-            folium.PolyLine(locations=[[q_lat, q_lon],[cpt_wgs.y, cpt_wgs.x]],
+            folium.PolyLine(locations=[[cpt_origin_wgs.y, cpt_origin_wgs.x],[cpt_wgs.y, cpt_wgs.x]],
                             color="#7F77DD", weight=2.5, dash_array="6 4",
                             tooltip=f"{dist_m:.1f} m").add_to(nm)
             folium.Marker(
@@ -939,8 +1026,14 @@ if st.session_state.gdf is not None:
                     st.rerun()
                     
                 if st.button("Calculate K-Nearest", key="btn_k_nearest", type="primary"):
-                    qpt_utm = gpd.GeoSeries([Point(k_lon, k_lat)], crs="EPSG:4326").to_crs(epsg=32636).iloc[0]
-                    dists = work_utm.geometry.distance(qpt_utm)
+                    with st.spinner("Checking for buildings at query point..."):
+                        bldg_geom = get_building_geometry(k_lat, k_lon, p.get("date"))
+                        
+                    qpt = Point(k_lon, k_lat)
+                    origin_geom = bldg_geom if bldg_geom is not None else qpt
+                    origin_utm = gpd.GeoSeries([origin_geom], crs="EPSG:4326").to_crs(epsg=32636).iloc[0]
+                    
+                    dists = work_utm.geometry.distance(origin_utm)
                     k_indices = dists.nsmallest(k_val).index
                     
                     res_data = []
@@ -959,13 +1052,19 @@ if st.session_state.gdf is not None:
                             "Road Type": hw, "Road Name": nm, "OSM ID": row["osm_id"]
                         })
                         
-                        _, cpt_utm = nearest_points(qpt_utm, work_utm.loc[idx, "geometry"])
+                        cpt_origin_utm, cpt_utm = nearest_points(origin_utm, work_utm.loc[idx, "geometry"])
                         cpt_wgs = gpd.GeoSeries([cpt_utm], crs="EPSG:32636").to_crs(epsg=4326).iloc[0]
+                        cpt_origin_wgs = gpd.GeoSeries([cpt_origin_utm], crs="EPSG:32636").to_crs(epsg=4326).iloc[0]
+                        
                         map_lines.append({
                             "geom": row.geometry, "hw": hw, "nm": nm, "dist": dist_m,
-                            "snap_y": cpt_wgs.y, "snap_x": cpt_wgs.x
+                            "snap_y": cpt_wgs.y, "snap_x": cpt_wgs.x,
+                            "origin_y": cpt_origin_wgs.y, "origin_x": cpt_origin_wgs.x
                         })
                     
+                    if bldg_geom is not None:
+                        st.success("🏢 Point falls within a building! Distance measured from the building perimeter/entrance.")
+                        
                     st.dataframe(pd.DataFrame(res_data), use_container_width=True, hide_index=True)
                     
                     d_vals = [r["Distance (m)"] for r in res_data]
@@ -977,6 +1076,14 @@ if st.session_state.gdf is not None:
                     c5.metric("Std dev", f"{np.std(d_vals):.1f} m" if len(d_vals) > 1 else "0.0 m")
                     
                     m_k = folium.Map(location=[k_lat, k_lon], zoom_start=15, tiles="CartoDB positron")
+                    
+                    if bldg_geom is not None and isinstance(bldg_geom, Polygon):
+                        folium.GeoJson(
+                            bldg_geom.__geo_interface__,
+                            style_function=lambda f: {"color": "blue", "weight": 2, "fillColor": "blue", "fillOpacity": 0.2},
+                            tooltip="Building"
+                        ).add_to(m_k)
+                        
                     folium.Marker([k_lat, k_lon], icon=folium.Icon(color="purple", icon="crosshairs", prefix="fa")).add_to(m_k)
                     
                     cmap = mcolors.LinearSegmentedColormap.from_list("", ["#300060", "#d0a0ff"])
@@ -987,8 +1094,16 @@ if st.session_state.gdf is not None:
                             style_function=lambda f, c=color: {"color": c, "weight": 4, "opacity": 0.8},
                             tooltip=f"Rank {i+1}: {item['hw']} ({item['dist']:.1f}m)"
                         ).add_to(m_k)
+                        
+                        if bldg_geom is not None:
+                            folium.CircleMarker(
+                                location=[item["origin_y"], item["origin_x"]],
+                                radius=4, color="blue", fill=True, fill_color="blue",
+                                tooltip="Building point"
+                            ).add_to(m_k)
+                            
                         folium.PolyLine(
-                            [[k_lat, k_lon], [item["snap_y"], item["snap_x"]]],
+                            [[item["origin_y"], item["origin_x"]], [item["snap_y"], item["snap_x"]]],
                             color="#888", weight=2, dash_array="5 5",
                             tooltip=f"{item['dist']:.1f} m"
                         ).add_to(m_k)
