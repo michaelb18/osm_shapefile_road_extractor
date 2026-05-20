@@ -180,7 +180,10 @@ def overpass_roads(lat: float, lon: float, radius_m: float,
             columns=["osm_id","name","highway","oneway","lanes","maxspeed","surface","geometry"],
             crs="EPSG:4326"
         )
+<<<<<<< HEAD
     # ensures WGS84 projection 
+=======
+>>>>>>> 1e2678702def659824fdf69134e0bd8490ee3660
     return gpd.GeoDataFrame(rows, crs="EPSG:4326")
 
 
@@ -279,6 +282,7 @@ with st.sidebar:
         else:
             for k in ["_preset_lat","_preset_lon","_preset_date"]:
                 st.session_state.pop(k, None)
+<<<<<<< HEAD
         
         st.divider()
 
@@ -374,6 +378,8 @@ with st.sidebar:
                 type="primary"
             )
 
+=======
+>>>>>>> 1e2678702def659824fdf69134e0bd8490ee3660
         st.divider()
     else:
         st.caption(
@@ -502,8 +508,12 @@ if st.session_state.gdf is not None:
                 st.session_state["q_lon"] = dd_lon
                 st.rerun()
 
+<<<<<<< HEAD
         # Find nearest road, projects in mercator for accurate distance calculations
         # distances are computed on the projected geometry
+=======
+        # Find nearest road
+>>>>>>> 1e2678702def659824fdf69134e0bd8490ee3660
         if st.button("📍 Find nearest road", type="primary"):
             qpt      = Point(q_lon, q_lat)
             gdf_m    = gdf.to_crs(epsg=3857)
@@ -961,8 +971,11 @@ if st.session_state.gdf is not None:
         if presets:
             st.success(f"✅ {len(presets)} preset(s) loaded")
 
+<<<<<<< HEAD
 
 
+=======
+>>>>>>> 1e2678702def659824fdf69134e0bd8490ee3660
             import pandas as pd
             pdf = pd.DataFrame(presets)[["lat","lon","date"]]
             pdf["date"] = pdf["date"].fillna("current")
