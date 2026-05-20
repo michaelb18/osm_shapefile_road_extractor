@@ -199,7 +199,11 @@ def get_building_geometry(lat: float, lon: float, date_str: str = None):
     date_clause = f'[date:"{date_str}"]' if date_str else ""
     query = f"""
     [out:json]{date_clause}[timeout:30];
-    way["building"](around:50,{lat},{lon});
+    (
+      way["building"](around:50,{lat},{lon});
+      node["entrance"](around:50,{lat},{lon});
+      node["door"](around:50,{lat},{lon});
+    );
     out body;
     >;
     out body qt;
@@ -233,6 +237,8 @@ def get_building_geometry(lat: float, lon: float, date_str: str = None):
                 entrances[el["id"]] = Point(el["lon"], el["lat"])
 
     qpt = Point(lon, lat)
+    
+    building_polys = []
     for el in data.get("elements", []):
         if el["type"] == "way" and "tags" in el and "building" in el["tags"]:
             nd_ids = el.get("nodes", [])
@@ -240,13 +246,29 @@ def get_building_geometry(lat: float, lon: float, date_str: str = None):
             if len(coords) >= 3:
                 try:
                     poly = Polygon(coords)
-                    if poly.contains(qpt):
-                        for n in nd_ids:
-                            if n in entrances:
-                                return entrances[n]
-                        return poly
+                    building_polys.append((poly, nd_ids))
                 except Exception:
                     pass
+
+    for poly, nd_ids in building_polys:
+        if poly.contains(qpt):
+            # 1. Entrances on the building perimeter
+            for n in nd_ids:
+                if n in entrances:
+                    return entrances[n]
+            # 2. Standalone entrances within or very close to the building
+            best_entrance = None
+            min_dist = float('inf')
+            for n_id, ent_pt in entrances.items():
+                dist = poly.distance(ent_pt)
+                if dist < 1e-4:  # roughly < 10 meters
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_entrance = ent_pt
+            if best_entrance:
+                return best_entrance
+            
+            return poly
     return None
 
 
