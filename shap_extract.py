@@ -94,7 +94,6 @@ def shp_safe(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
             out[col] = out[col].apply(lambda x: "|".join(map(str, x)) if isinstance(x, list) else x)
     return out
 
-
 def overpass_roads(lat: float, lon: float, radius_m: float,
                    date_str: str = None) -> gpd.GeoDataFrame:
     """
@@ -104,11 +103,10 @@ def overpass_roads(lat: float, lon: float, radius_m: float,
     Retries across two mirror servers with exponential back-off.
     """
     import time
-
     MIRRORS = [
-        "https://overpass-api.de/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
         "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+        "https://overpass-api.de/api/interpreter",
     ]
 
     date_clause = f'[date:"{date_str}"]' if date_str else ""
@@ -130,10 +128,10 @@ def overpass_roads(lat: float, lon: float, radius_m: float,
                     time.sleep(wait)
                 resp = requests.post(mirror, data={"data": query}, timeout=120)
                 if resp.status_code == 429:
-                    time.sleep(10)        # rate-limited — wait longer
+                    time.sleep(30)        # rate-limited — wait longer #TODO, the rule for this is you have to wait for 30 seconds
                     continue
                 if resp.status_code in (406, 504, 502, 503):
-                    time.sleep(5)
+                    time.sleep(30) #TODO: the rule for this is you have to wait for 30 seconds
                     continue
                 resp.raise_for_status()
                 data = resp.json()
@@ -188,6 +186,62 @@ def overpass_roads(lat: float, lon: float, radius_m: float,
     # ensures WGS84 projection 
     return gpd.GeoDataFrame(rows, crs="EPSG:4326")
 
+def get_area_buildings(lat: float, lon: float, dist: float, date_str: str = None) -> gpd.GeoDataFrame:
+    import time
+    #delay this function so that we don't get banned from osm. If you get a Connection Refused error, it means you have been temporarily banned from open street map
+    time.sleep(30)
+    import osmnx as ox
+    from osmnx._errors import InsufficientResponseError 
+    ox.settings.user_agent = "michaelb18/1.0 (michaelb18@vt.edu)"
+    ox.settings.use_cache = True
+    import requests
+    MIRRORS = [
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+    ]
+
+    if date_str is not None:
+        ox.settings.overpass_settings = f"[out:json][date:'{date_str}']{{maxsize}}"
+    else:
+        ox.settings.overpass_settings = "[out:json]{maxsize}"
+    lulc_tags = {
+        "landuse": True,
+        "amenity": True,
+        "building": True,
+        "natural": True,
+    }
+
+    bbox = ox.utils_geo.bbox_from_point(point=(lat, lon), dist=dist)
+
+    for url in MIRRORS:
+        try:
+            ox.settings.overpass_url = url
+            gdf = ox.features_from_bbox(bbox=bbox, tags=lulc_tags)
+
+            gdf['building'] = gdf['building'].replace('yes', np.nan)
+            target_cols = ['landuse', 'natural', 'building', 'amenity',
+                           'military', 'healthcare', 'shop']
+            target_cols = [col for col in target_cols if col in gdf.columns]
+
+            gdf = gdf[gdf.geom_type.isin(["Polygon", "MultiPolygon"])]
+            gdf = gdf.dropna(subset=target_cols, how='all')
+            gdf['highway'] = gdf[target_cols].bfill(axis=1).iloc[:, 0]
+
+            drop_cols = ['fixme', 'note', 'comment', 'description', 'source']
+            gdf = gdf.drop(columns=[c for c in drop_cols if c in gdf.columns], errors='ignore')
+
+            return gdf.to_crs(epsg=4326)
+        except (requests.exceptions.RequestException, Exception) as e:
+            st.warning(f"Request to overpass failed: {e}")
+            print(e)
+            if isinstance(e, InsufficientResponseError):
+                return gpd.GeoDataFrame(columns=["osm_id","name","highway","oneway","lanes","maxspeed","surface","geometry"], geometry='geometry', crs='EPSG:4326')
+
+    raise RuntimeError("All Overpass Endpoints Failed")
+
+def get_features(lat: float, lon: float, radius_m: float, date_str: str = None) -> gpd.GeoDataFrame:
+    
+    return pd.concat([get_area_buildings(lat, lon, radius, date_str), overpass_roads(lat, lon, radius, date_str)])
 
 def get_building_geometry(lat: float, lon: float, date_str: str = None):
     """Fetch building footprint at coordinate and return its geometry, or an entrance point if available."""
@@ -287,8 +341,25 @@ def add_roads_to_map(fmap, gdf, color_by_type=True,
         ).add_to(fmap)
 
 
+def lines_to_polygons(geom):
+    if geom.geom_type == "LineString":
+        if geom.is_closed:
+            return Polygon(geom.coords)
+        else:
+            coords = list(geom.coords)
+            if coords[0] != coords[-1]:
+                coords.append(coords[0])  # Force close the loop
+            return Polygon(coords)
+
+    elif geom.geom_type == "MultiLineString":
+        coords = [list(line.coords) for line in geom.geoms]
+        return Polygon(coords[0])
+
+    return geom
+
 def make_zip_shp(gdf, stem):
     """Package a GeoDataFrame as a zipped Shapefile, return BytesIO or None."""
+    gdf["geometry"] = gdf.geometry.apply(lines_to_polygons)
     if gdf is None or gdf.empty:
         return None
     with tempfile.TemporaryDirectory() as tmp:
@@ -443,7 +514,7 @@ with st.sidebar:
                                         pass
                                 
                                 try:
-                                    gdf_p = overpass_roads(preset["lat"], preset["lon"], batch_radius, date_str)
+                                    gdf_p = get_features(preset["lat"], preset["lon"], batch_radius, date_str)
                                     if not gdf_p.empty:
                                         stem = f"preset_{i+1}"
                                         # Use shp_safe directly as make_zip_shp takes too long to run multiple times, 
@@ -547,7 +618,7 @@ if "params" not in st.session_state: st.session_state.params = {}
 if fetch_btn:
     with st.spinner(f"Querying Overpass API — {radius} m, {date_label}…"):
         try:
-            result = overpass_roads(lat, lon, radius, query_date)
+            result = get_features(lat, lon, radius, query_date)
             if result.empty:
                 st.warning("No roads returned. Try a larger radius or different location.")
             else:

@@ -1,13 +1,16 @@
 # Sensitive data
 presets.csv
+quicktest.py
 
 # Virtual environment
 .venv/
+khthon_env
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
+cache/**
 
 # OS
 .DS_Store
@@ -21,3 +24,5 @@ Thumbs.db
 *.cpg
 *.geojson
 *.zip
+
+
