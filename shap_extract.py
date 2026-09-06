@@ -199,11 +199,12 @@ def get_area_buildings(lat: float, lon: float, dist: float, date_str: str = None
         "https://overpass-api.de/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
     ]
-
+    print(f'Retrieving structures for date {date_str}')
     if date_str is not None:
         ox.settings.overpass_settings = f"[out:json][date:'{date_str}']{{maxsize}}"
     else:
         ox.settings.overpass_settings = "[out:json]{maxsize}"
+    #ox.settings.overpass_settings = "[out:json]{maxsize}"
     lulc_tags = {
         "landuse": True,
         "amenity": True,
@@ -217,6 +218,8 @@ def get_area_buildings(lat: float, lon: float, dist: float, date_str: str = None
         try:
             ox.settings.overpass_url = url
             gdf = ox.features_from_bbox(bbox=bbox, tags=lulc_tags)
+            gdf = gdf.reset_index()
+            gdf['osm_id'] = gdf['id']
 
             gdf['building'] = gdf['building'].replace('yes', np.nan)
             target_cols = ['landuse', 'natural', 'building', 'amenity',
@@ -241,7 +244,7 @@ def get_area_buildings(lat: float, lon: float, dist: float, date_str: str = None
 
 def get_features(lat: float, lon: float, radius_m: float, date_str: str = None) -> gpd.GeoDataFrame:
     
-    return pd.concat([get_area_buildings(lat, lon, radius, date_str), overpass_roads(lat, lon, radius, date_str)])
+    return pd.concat([get_area_buildings(lat, lon, radius_m, date_str = date_str), overpass_roads(lat, lon, radius_m, date_str)])
 
 def get_building_geometry(lat: float, lon: float, date_str: str = None):
     """Fetch building footprint at coordinate and return its geometry, or an entrance point if available."""
@@ -796,10 +799,10 @@ if st.session_state.gdf is not None:
                 st.error("Date A must be earlier than Date B.")
             else:
                 with st.spinner(f"Fetching roads on {date_a}…"):
-                    gdf_a = overpass_roads(p["lat"], p["lon"], p["radius"],
+                    gdf_a = get_features(p["lat"], p["lon"], p["radius"],
                                            f"{date_a.isoformat()}T00:00:00Z")
                 with st.spinner(f"Fetching roads on {date_b}…"):
-                    gdf_b = overpass_roads(p["lat"], p["lon"], p["radius"],
+                    gdf_b = get_features(p["lat"], p["lon"], p["radius"],
                                            f"{date_b.isoformat()}T00:00:00Z")
 
                 ids_a = set(gdf_a["osm_id"].astype(str))
@@ -952,7 +955,7 @@ if st.session_state.gdf is not None:
                         text=f"Fetching {snap_date} ({i+1}/{len(preview_dates)})…"
                     )
                     try:
-                        snap_gdf = overpass_roads(
+                        snap_gdf = get_features(
                             p["lat"], p["lon"], p["radius"],
                             f"{snap_date.isoformat()}T00:00:00Z"
                         )
@@ -1098,6 +1101,7 @@ if st.session_state.gdf is not None:
     # Road Network Analytics
     with tab_stats:
         work = st.session_state.get("filtered_gdf", gdf)
+        work = work[work.geometry.geom_type.isin(['LineString', 'MultiLineString'])]
         if work.empty:
             st.warning("No road segments available.")
         else:
@@ -1139,7 +1143,7 @@ if st.session_state.gdf is not None:
                         if isinstance(hw, list): hw = hw[0]
                         nm = row.get("name", "—")
                         if isinstance(nm, list): nm = nm[0]
-                        if pd.isna(nm) or not nm or str(nm) == "nan": nm = "—"
+                        if np.all(pd.isna(nm)) or not nm or str(nm) == "nan": nm = "—"
                         
                         res_data.append({
                             "Rank": rank, "Distance (m)": round(dist_m, 1),
@@ -1230,7 +1234,7 @@ if st.session_state.gdf is not None:
                         dist_m = work_dist.loc[idx, "dist_m"]
                         nm = work_dist.loc[idx, "name"]
                         if isinstance(nm, list): nm = nm[0]
-                        if pd.isna(nm) or not nm or str(nm) == "nan": nm = "—"
+                        if np.all(pd.isna(nm)) or not nm or str(nm) == "nan": nm = "—"
                         
                         surf = str(work_dist.loc[idx].get("surface", "")).lower()
                         is_paved = hw_type in PAVED_TYPES or any(s in surf for s in PAVED_SURFACES)
@@ -1383,7 +1387,7 @@ if st.session_state.gdf is not None:
                             if i > 0: import time; time.sleep(2)
                             progress.progress(int((i+1)/len(c_dates)*100), text=f"Fetching {d}...")
                             try:
-                                sgdf = overpass_roads(p["lat"], p["lon"], p["radius"], f"{d.isoformat()}T00:00:00Z")
+                                sgdf = get_features(p["lat"], p["lon"], p["radius"], f"{d.isoformat()}T00:00:00Z")
                                 cids = set(sgdf["osm_id"].astype(str))
                                 
                                 t_km = sgdf.to_crs(epsg=32636).geometry.length.sum() / 1000 if not sgdf.empty else 0.0
@@ -1512,8 +1516,8 @@ if st.session_state.gdf is not None:
                                 st.metric("K=5 Mean Dist", f"{acc['k5_mean']:.1f} m" if pd.notnull(acc['k5_mean']) else "N/A")
                     else:
                         with st.spinner("Fetching historical networks..."):
-                            gdf_d1 = overpass_roads(p["lat"], p["lon"], p["radius"], f"{ca_date1.isoformat()}T00:00:00Z")
-                            gdf_d2 = overpass_roads(p["lat"], p["lon"], p["radius"], f"{ca_date2.isoformat()}T00:00:00Z")
+                            gdf_d1 = get_features(p["lat"], p["lon"], p["radius"], f"{ca_date1.isoformat()}T00:00:00Z")
+                            gdf_d2 = get_features(p["lat"], p["lon"], p["radius"], f"{ca_date2.isoformat()}T00:00:00Z")
                             
                         acc_a1 = calc_access(pa_lat, pa_lon, gdf_d1)
                         acc_a2 = calc_access(pa_lat, pa_lon, gdf_d2)
